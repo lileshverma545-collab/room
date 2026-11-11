@@ -1,0 +1,8 @@
+{
+  "appId": "com.roomduel.app",
+  "appName": "Room Duel",
+  "webDir": "www",
+  "server": {
+    "androidScheme": "https"
+  }
+}

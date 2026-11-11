@@ -1,0 +1,395 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+<title>Room Duel</title>
+<script src="https://cdn.tailwindcss.com"></script>
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+<link href="https://fonts.googleapis.com/css2?family=Bungee&family=Sora:wght@400;600;700&display=swap" rel="stylesheet" />
+<style>
+  :root { --ink:#14122b; --panel:#201d45; --line:#3a3670; --chalk:#f4f1ff; --x:#ff6b5b; --o:#3fe0d0; --gold:#ffc857; }
+  html,body { background:var(--ink); color:var(--chalk); font-family:'Sora',system-ui,sans-serif; min-height:100%; }
+  body { padding-top:env(safe-area-inset-top); padding-bottom:env(safe-area-inset-bottom); }
+  .display { font-family:'Bungee',system-ui,sans-serif; letter-spacing:.02em; }
+  .panel { background:var(--panel); border:2px solid var(--line); border-radius:18px; }
+  .cell { aspect-ratio:1/1; background:var(--ink); border:2px solid var(--line); border-radius:14px;
+          font-family:'Bungee'; font-size:clamp(2.5rem,16vw,4.5rem); line-height:1; transition:transform .12s, border-color .12s; }
+  .cell:not(:disabled):active { transform:scale(.94); }
+  .cell.mine-turn:not(:disabled):hover { border-color:var(--gold); }
+  .cell.win { border-color:var(--gold); background:#2d2860; }
+  .mx { color:var(--x); } .mo { color:var(--o); }
+  .btn { font-weight:700; border-radius:12px; padding:.8rem 1rem; transition:transform .1s, filter .1s; }
+  .btn:active { transform:translateY(2px); }
+  .btn:focus-visible, .cell:focus-visible, input:focus-visible { outline:3px solid var(--gold); outline-offset:2px; }
+  .btn-main { background:var(--gold); color:#2a1f00; }
+  .btn-alt  { background:transparent; border:2px solid var(--line); color:var(--chalk); }
+  .btn-danger { background:var(--x); color:#2a0a05; }
+  input { background:var(--ink); border:2px solid var(--line); border-radius:12px; padding:.8rem 1rem; color:var(--chalk); width:100%; }
+  @keyframes pop { from { transform:scale(.6); opacity:0 } to { transform:scale(1); opacity:1 } }
+  .pop { animation:pop .18s ease-out; }
+  @media (prefers-reduced-motion:reduce){ .pop{animation:none} .cell,.btn{transition:none} }
+</style>
+</head>
+<body>
+<main class="mx-auto w-full max-w-md px-4 py-6 flex flex-col gap-5">
+
+  <!-- Header. Tap the logo 5 times quickly to open the hidden admin login. -->
+  <header class="text-center select-none">
+    <h1 id="logo" class="display text-4xl cursor-pointer"><span class="mx">Room</span> <span class="mo">Duel</span></h1>
+    <p class="text-sm opacity-70 mt-1">Tic-Tac-Toe with a room code. Two players, live.</p>
+  </header>
+
+  <!-- LOBBY -->
+  <section id="lobby" class="flex flex-col gap-4">
+    <div class="panel p-4 flex flex-col gap-3">
+      <label for="name" class="text-sm font-semibold">Your name</label>
+      <input id="name" maxlength="14" placeholder="e.g. Aarav" autocomplete="off" />
+    </div>
+    <div class="panel p-4 flex flex-col gap-3">
+      <button id="btnCreate" class="btn btn-main">Create a room</button>
+    </div>
+    <div class="panel p-4 flex flex-col gap-3">
+      <label for="code" class="text-sm font-semibold">Join with a code</label>
+      <input id="code" maxlength="4" placeholder="4-character code" autocapitalize="characters" autocomplete="off"
+             class="display text-center text-2xl tracking-widest uppercase" />
+      <button id="btnJoin" class="btn btn-alt">Join room</button>
+    </div>
+  </section>
+
+  <!-- GAME -->
+  <section id="game" class="hidden flex flex-col gap-4">
+    <div class="panel p-4 flex items-center justify-between gap-3">
+      <div>
+        <div class="text-xs opacity-70">Room code</div>
+        <div id="roomCode" class="display text-3xl text-[var(--gold)]"></div>
+      </div>
+      <button id="btnCopy" class="btn btn-alt text-sm">Copy code</button>
+    </div>
+
+    <div class="grid grid-cols-2 gap-3 text-center">
+      <div id="pX" class="panel p-3"><div class="display text-2xl mx">X</div><div id="nameX" class="text-sm truncate">-</div></div>
+      <div id="pO" class="panel p-3"><div class="display text-2xl mo">O</div><div id="nameO" class="text-sm truncate">Waiting…</div></div>
+    </div>
+
+    <p id="status" class="text-center font-semibold min-h-[1.5rem]" aria-live="polite"></p>
+
+    <div id="board" class="grid grid-cols-3 gap-2" role="grid" aria-label="Game board"></div>
+
+    <div class="grid grid-cols-2 gap-3">
+      <button id="btnRematch" class="btn btn-main hidden">Play again</button>
+      <button id="btnLeave" class="btn btn-alt col-span-1">Leave room</button>
+    </div>
+  </section>
+
+  <!-- ADMIN PANEL (hidden until admin logs in) -->
+  <section id="admin" class="hidden flex flex-col gap-4">
+    <div class="panel p-4 flex items-center justify-between">
+      <div>
+        <div class="display text-xl">Admin</div>
+        <div id="adminCount" class="text-sm opacity-70">0 active rooms</div>
+      </div>
+      <button id="btnAdminOut" class="btn btn-alt text-sm">Log out</button>
+    </div>
+    <button id="btnWipe" class="btn btn-danger">Delete all rooms</button>
+    <div id="roomList" class="flex flex-col gap-2"></div>
+  </section>
+
+</main>
+
+<!-- Admin login dialog -->
+<dialog id="adminDlg" class="panel p-5 w-[90%] max-w-sm text-[var(--chalk)]" style="background:var(--panel)">
+  <h2 class="display text-xl mb-3">Admin login</h2>
+  <div class="flex flex-col gap-3">
+    <input id="adEmail" type="email" placeholder="Admin email" autocomplete="username" />
+    <input id="adPass" type="password" placeholder="Admin password" autocomplete="current-password" />
+    <p id="adErr" class="text-sm text-[var(--x)] min-h-[1.25rem]"></p>
+    <div class="grid grid-cols-2 gap-3">
+      <button id="adCancel" class="btn btn-alt">Cancel</button>
+      <button id="adGo" class="btn btn-main">Log in</button>
+    </div>
+  </div>
+</dialog>
+
+<div id="toast" class="fixed left-1/2 -translate-x-1/2 bottom-6 px-4 py-3 rounded-xl bg-[var(--chalk)] text-[var(--ink)] font-semibold text-sm hidden z-50"></div>
+
+<script type="module">
+import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-app.js";
+import { getAuth, signInAnonymously, signInWithEmailAndPassword, signOut }
+  from "https://www.gstatic.com/firebasejs/10.12.2/firebase-auth.js";
+import { getDatabase, ref, get, set, remove, update, onValue, runTransaction }
+  from "https://www.gstatic.com/firebasejs/10.12.2/firebase-database.js";
+
+/* ============================================================
+   1) PASTE YOUR FIREBASE CONFIG HERE (Firebase Console →
+      Project settings → Your apps → Web app → Config)
+   ============================================================ */
+const firebaseConfig = {
+  apiKey: "PASTE_API_KEY",
+  authDomain: "PASTE_PROJECT_ID.firebaseapp.com",
+  databaseURL: "https://PASTE_PROJECT_ID-default-rtdb.firebaseio.com",
+  projectId: "PASTE_PROJECT_ID",
+  appId: "PASTE_APP_ID"
+};
+/* ============================================================ */
+
+const app = initializeApp(firebaseConfig);
+const auth = getAuth(app);
+const db = getDatabase(app);
+
+const $ = id => document.getElementById(id);
+const WINS = [[0,1,2],[3,4,5],[6,7,8],[0,3,6],[1,4,7],[2,5,8],[0,4,8],[2,4,6]];
+const CODE_CHARS = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789"; // no look-alikes (0/O, 1/I)
+
+let uid = null, isAdmin = false;
+let roomCode = null, roomUnsub = null, myMark = null, adminUnsub = null;
+
+/* ---------- helpers ---------- */
+function toast(msg) {
+  const t = $("toast"); t.textContent = msg; t.classList.remove("hidden");
+  clearTimeout(toast._t); toast._t = setTimeout(() => t.classList.add("hidden"), 2600);
+}
+function show(which) {
+  for (const id of ["lobby","game","admin"]) $(id).classList.toggle("hidden", id !== which);
+}
+function cleanName() {
+  const n = $("name").value.trim().slice(0, 14);
+  if (n) localStorage.setItem("rd_name", n);
+  return n || "Player";
+}
+function newCode() {
+  let s = ""; for (let i = 0; i < 4; i++) s += CODE_CHARS[Math.floor(Math.random() * CODE_CHARS.length)];
+  return s;
+}
+function winnerOf(b) {
+  for (const [a,c,d] of WINS) if (b[a] !== "-" && b[a] === b[c] && b[a] === b[d]) return { mark: b[a], line: [a,c,d] };
+  return b.includes("-") ? null : { mark: "draw", line: [] };
+}
+
+/* ---------- sign in (anonymous) ---------- */
+$("name").value = localStorage.getItem("rd_name") || "";
+signInAnonymously(auth).then(c => { uid = c.user.uid; }).catch(e => toast("Sign-in failed: " + e.code));
+
+/* ---------- create room ---------- */
+$("btnCreate").onclick = async () => {
+  if (!uid) return toast("Still connecting… try again");
+  const name = cleanName();
+  try {
+    let code, tries = 0;
+    do { code = newCode(); tries++; } while ((await get(ref(db, "rooms/" + code))).exists() && tries < 8);
+    await set(ref(db, "rooms/" + code), {
+      host: uid, hostName: name, guest: null, guestName: null,
+      board: "---------", turn: "X", status: "waiting", winner: null,
+      createdAt: Date.now()
+    });
+    enterRoom(code);
+  } catch (e) { toast("Could not create room: " + e.code); }
+};
+
+/* ---------- join room ---------- */
+$("btnJoin").onclick = async () => {
+  if (!uid) return toast("Still connecting… try again");
+  const code = $("code").value.trim().toUpperCase();
+  if (code.length !== 4) return toast("Enter the 4-character code");
+  const name = cleanName();
+  try {
+    const snap = await get(ref(db, "rooms/" + code));
+    if (!snap.exists()) return toast("Room not found");
+    const r = snap.val();
+    if (r.host !== uid && r.guest && r.guest !== uid) return toast("Room is full");
+    if (r.host !== uid && r.guest !== uid) {
+      const res = await runTransaction(ref(db, "rooms/" + code), cur => {
+        if (!cur || (cur.guest && cur.guest !== uid)) return;       // abort
+        cur.guest = uid; cur.guestName = name; cur.status = "playing";
+        return cur;
+      });
+      if (!res.committed) return toast("Could not join that room");
+    }
+    enterRoom(code);
+  } catch (e) { toast("Could not join: " + e.code); }
+};
+
+/* ---------- in-room ---------- */
+function enterRoom(code) {
+  roomCode = code;
+  $("roomCode").textContent = code;
+  show("game");
+  if (roomUnsub) roomUnsub();
+  roomUnsub = onValue(ref(db, "rooms/" + code), snap => {
+    if (!snap.exists()) { leaveLocal(); toast("Room closed"); return; }
+    render(snap.val());
+  }, err => { leaveLocal(); toast("Lost connection: " + err.code); });
+}
+
+function leaveLocal() {
+  if (roomUnsub) { roomUnsub(); roomUnsub = null; }
+  roomCode = null; myMark = null;
+  show(isAdmin ? "admin" : "lobby");
+}
+
+function render(r) {
+  myMark = r.host === uid ? "X" : (r.guest === uid ? "O" : null);
+  $("nameX").textContent = r.hostName || "-";
+  $("nameO").textContent = r.guestName || "Waiting…";
+  $("pX").style.borderColor = (r.status === "playing" && r.turn === "X") ? "var(--gold)" : "var(--line)";
+  $("pO").style.borderColor = (r.status === "playing" && r.turn === "O") ? "var(--gold)" : "var(--line)";
+
+  const board = r.board.split("");
+  const w = winnerOf(board);
+  const finished = r.status === "finished";
+  const myTurn = r.status === "playing" && r.turn === myMark;
+
+  const boardEl = $("board"); boardEl.innerHTML = "";
+  board.forEach((v, i) => {
+    const b = document.createElement("button");
+    b.className = "cell" + (myTurn && v === "-" ? " mine-turn" : "");
+    if (finished && w && w.line.includes(i)) b.classList.add("win");
+    if (v !== "-") { b.textContent = v; b.classList.add(v === "X" ? "mx" : "mo"); }
+    b.disabled = !(myTurn && v === "-");
+    b.setAttribute("aria-label", "Cell " + (i + 1) + (v === "-" ? ", empty" : ", " + v));
+    b.onclick = () => play(i);
+    boardEl.appendChild(b);
+  });
+
+  let msg = "";
+  if (r.status === "waiting") msg = "Share the code. Waiting for your friend…";
+  else if (finished) msg = r.winner === "draw" ? "It's a draw." : (r.winner === myMark ? "You win!" : "You lose.");
+  else msg = myTurn ? "Your turn (" + myMark + ")" : "Opponent's turn…";
+  $("status").textContent = msg;
+  $("btnRematch").classList.toggle("hidden", !(finished && myMark));
+}
+
+async function play(i) {
+  if (!roomCode) return;
+  try {
+    await runTransaction(ref(db, "rooms/" + roomCode), r => {
+      if (!r || r.status !== "playing") return;
+      const mark = r.host === uid ? "X" : (r.guest === uid ? "O" : null);
+      if (!mark || r.turn !== mark || r.board[i] !== "-") return;   // illegal → abort
+      const b = r.board.split(""); b[i] = mark;
+      const w = winnerOf(b);
+      r.board = b.join("");
+      if (w) { r.status = "finished"; r.winner = w.mark; }
+      else r.turn = mark === "X" ? "O" : "X";
+      return r;
+    });
+  } catch (e) { toast("Move failed: " + e.code); }
+}
+
+$("btnRematch").onclick = async () => {
+  if (!roomCode) return;
+  try {
+    await runTransaction(ref(db, "rooms/" + roomCode), r => {
+      if (!r || r.status !== "finished") return;
+      r.board = "---------"; r.turn = "X"; r.status = "playing"; r.winner = null;
+      return r;
+    });
+  } catch (e) { toast("Could not restart: " + e.code); }
+};
+
+$("btnLeave").onclick = async () => {
+  if (!roomCode) return;
+  const code = roomCode;
+  try {
+    const snap = await get(ref(db, "rooms/" + code));
+    if (snap.exists()) {
+      const r = snap.val();
+      if (r.host === uid) await remove(ref(db, "rooms/" + code));            // host leaves → room closes
+      else if (r.guest === uid) await update(ref(db, "rooms/" + code), {      // guest leaves → room reopens
+        guest: null, guestName: null, status: "waiting", board: "---------", turn: "X", winner: null
+      });
+    }
+  } catch (e) { /* ignore */ }
+  leaveLocal();
+};
+
+$("btnCopy").onclick = async () => {
+  try { await navigator.clipboard.writeText(roomCode); toast("Code copied"); }
+  catch { toast("Code: " + roomCode); }
+};
+$("code").addEventListener("input", e => { e.target.value = e.target.value.toUpperCase().replace(/[^A-Z0-9]/g, ""); });
+
+/* ============================================================
+   HIDDEN ADMIN
+   Open it by tapping the "Room Duel" logo 5 times within 3 seconds.
+   Login uses a real Firebase Email/Password account, and the database
+   rules only let that account's UID list/delete rooms.
+   ============================================================ */
+let taps = 0, tapTimer = null;
+$("logo").addEventListener("click", () => {
+  taps++; clearTimeout(tapTimer); tapTimer = setTimeout(() => taps = 0, 3000);
+  if (taps >= 5) { taps = 0; $("adErr").textContent = ""; $("adminDlg").showModal(); }
+});
+$("adCancel").onclick = () => $("adminDlg").close();
+
+$("adGo").onclick = async () => {
+  $("adErr").textContent = "";
+  try {
+    const c = await signInWithEmailAndPassword(auth, $("adEmail").value.trim(), $("adPass").value);
+    uid = c.user.uid;
+    // Prove this account really is the admin: the rules only allow it to read /rooms.
+    await get(ref(db, "rooms"));
+    isAdmin = true;
+    $("adPass").value = "";
+    $("adminDlg").close();
+    openAdmin();
+  } catch (e) {
+    $("adErr").textContent = e.code === "PERMISSION_DENIED" || /permission/i.test(e.message || "")
+      ? "This account is not the admin. Check the UID in your database rules."
+      : "Login failed: " + (e.code || e.message);
+    await restoreGuest();
+  }
+};
+
+function openAdmin() {
+  if (roomUnsub) { roomUnsub(); roomUnsub = null; }
+  show("admin");
+  if (adminUnsub) adminUnsub();
+  adminUnsub = onValue(ref(db, "rooms"), snap => {
+    const list = $("roomList"); list.innerHTML = "";
+    const rooms = snap.val() || {};
+    const codes = Object.keys(rooms).sort((a, b) => (rooms[b].createdAt || 0) - (rooms[a].createdAt || 0));
+    $("adminCount").textContent = codes.length + " active room" + (codes.length === 1 ? "" : "s");
+    if (!codes.length) {
+      const p = document.createElement("p");
+      p.className = "text-center opacity-70 py-6"; p.textContent = "No active rooms. Rooms appear here when players create them.";
+      list.appendChild(p); return;
+    }
+    for (const code of codes) {
+      const r = rooms[code];
+      const row = document.createElement("div");
+      row.className = "panel p-3 flex items-center justify-between gap-3";
+      const info = document.createElement("div"); info.className = "min-w-0";
+      const t = document.createElement("div"); t.className = "display text-lg text-[var(--gold)]"; t.textContent = code;
+      const s = document.createElement("div"); s.className = "text-xs opacity-80 truncate";
+      const mins = Math.max(0, Math.round((Date.now() - (r.createdAt || Date.now())) / 60000));
+      s.textContent = (r.hostName || "?") + " vs " + (r.guestName || "—") + " · " + r.status + " · " + mins + " min old";
+      info.append(t, s);
+      const del = document.createElement("button"); del.className = "btn btn-danger text-sm"; del.textContent = "Delete";
+      del.onclick = async () => {
+        if (!confirm("Delete room " + code + "?")) return;
+        try { await remove(ref(db, "rooms/" + code)); toast("Room " + code + " deleted"); }
+        catch (e) { toast("Delete failed: " + e.code); }
+      };
+      row.append(info, del); list.appendChild(row);
+    }
+  }, err => toast("Cannot read rooms: " + err.code));
+}
+
+$("btnWipe").onclick = async () => {
+  if (!confirm("Delete ALL rooms? Every active game will end.")) return;
+  try { await remove(ref(db, "rooms")); toast("All rooms deleted"); }
+  catch (e) { toast("Delete failed: " + e.code); }
+};
+
+async function restoreGuest() {
+  isAdmin = false;
+  if (adminUnsub) { adminUnsub(); adminUnsub = null; }
+  await signOut(auth);
+  const c = await signInAnonymously(auth); uid = c.user.uid;
+}
+$("btnAdminOut").onclick = async () => { await restoreGuest(); show("lobby"); toast("Logged out"); };
+</script>
+</body>
+</html>
